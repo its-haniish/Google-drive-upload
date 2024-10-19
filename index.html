@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload to Google Drive with Auto Refresh Token</title>
+    <link rel="stylesheet" href="styles.css"> <!-- Link to external CSS file -->
+</head>
+<body>
+
+    <h2>Upload a File to Google Drive</h2>
+    <input type="file" id="fileInput" />
+    <button onclick="uploadFile()">Upload File</button>
+
+    <p id="status"></p>
+
+    <div id="progressContainer">
+        <div id="progressBar"></div>
+    </div>
+
+    <script>
+        // Replace with your own credentials
+        const CLIENT_ID = '462182650159-4l8cppkffpl4o6aet7vu2pvphjbipl79.apps.googleusercontent.com';
+        const CLIENT_SECRET = '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';
+        const REFRESH_TOKEN = '1//04oP9vd-_5RPnCgYIARAAGAQSNwF-L9Ir5Pkobcz1BmaSIZJhyxNcAIG3BJruz9ds7PqgNpRRslc5Xb3CmQx5hdu-vYPRx1hNUKk';
+
+        let accessToken = ''; // Initial access token
+        let tokenExpirationTime = 0; // When the token will expire
+
+        // Function to refresh the access token
+        function refreshAccessToken() {
+            const params = new URLSearchParams();
+            params.append('client_id', CLIENT_ID);
+            params.append('client_secret', CLIENT_SECRET);
+            params.append('refresh_token', REFRESH_TOKEN);
+            params.append('grant_type', 'refresh_token');
+
+            return fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: params.toString(),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to refresh access token');
+                }
+                return response.json();
+            })
+            .then(data => {
+                accessToken = data.access_token; // Update access token
+                const expiresIn = data.expires_in; // Typically 3600 seconds (1 hour)
+                tokenExpirationTime = Date.now() + expiresIn * 1000; // Update expiration time
+                console.log('New Access Token:', accessToken); // Log new token
+            })
+            .catch(error => {
+                console.error('Error refreshing access token:', error);
+            });
+        }
+
+        // Function to upload a file to Google Drive
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('Please select a file to upload.');
+                return;
+            }
+
+            // Check if access token is expired
+            if (Date.now() >= tokenExpirationTime) {
+                console.log('Access token expired, refreshing...');
+                refreshAccessToken().then(() => {
+                    console.log('Access token refreshed, performing upload...');
+                    performUpload(file);
+                });
+            } else {
+                console.log('Access token valid, performing upload...');
+                performUpload(file);
+            }
+        }
+
+        // Function to perform the actual upload
+        function performUpload(file) {
+            console.log('Current Access Token before upload:', accessToken); // Log token
+
+            const metadata = {
+                'name': file.name,
+                'mimeType': file.type,
+                'parents': ['1Tu40OjGqM5Qiq01xgJBjzOIa6jasZ84X'] // Replace with your folder ID
+            };
+
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('file', file);
+
+            // Show progress container
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            progressContainer.style.display = 'block'; // Show the progress bar
+
+            fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: new Headers({
+                    'Authorization': 'Bearer ' + accessToken // Use the updated access token
+                }),
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(`Error: ${response.status} ${text}`); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('status').textContent = 'File uploaded successfully!';
+                console.log('File uploaded successfully:', data);
+                progressBar.style.width = '100%'; // Set progress bar to 100%
+            })
+            .catch(error => {
+                document.getElementById('status').textContent = 'File upload failed!';
+                console.error('Error uploading file:', error);
+            });
+
+            // Track upload progress
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart');
+            xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+            xhr.upload.addEventListener('progress', (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    progressBar.style.width = percentComplete + '%';
+                    progressBar.textContent = Math.round(percentComplete) + '%'; // Optional: Show percentage text
+                }
+            });
+
+            xhr.onload = function() {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    const response = JSON.parse(xhr.responseText);
+                    document.getElementById('status').textContent = 'File uploaded successfully!';
+                    console.log('File uploaded successfully:', response);
+                } else {
+                    document.getElementById('status').textContent = 'File upload failed!';
+                    console.error('Error uploading file:', xhr.statusText);
+                }
+            };
+
+            xhr.onerror = function() {
+                document.getElementById('status').textContent = 'File upload failed!';
+                console.error('Error uploading file:', xhr.statusText);
+            };
+
+            xhr.send(formData); // Send the form data to upload the file
+        }
+
+        // Initial call to set the access token and expiration time
+        function setInitialTokens(initialAccessToken, initialExpiresIn) {
+            accessToken = initialAccessToken;
+            tokenExpirationTime = Date.now() + initialExpiresIn * 1000; // Set the expiration time
+        }
+
+        // Call setInitialTokens with your initial access token and its expiration time (in seconds)
+        setInitialTokens('ya29.a0AcM612wdumMDGZs81d6NiY1sd_DIgx_G-6_xqcEn1PCY_Ykpr9ZRpF8NkafhWhCFvvn9I-P8SQj8UlOK3rN4H_sI_EYFdwZF4BVPU05Sx4zWctsQWLf69fJZNcMKO3OQa5Tgskm8b8_qAzrPYX0zcCwSIeQDDOezTPsbDzyraCgYKAXsSARISFQHGX2MivxS4DDFuAufp3x_ELnqoNA0175', 3600); // Set this to your initial access token
+
+    </script>
+
+</body>
+</html>
